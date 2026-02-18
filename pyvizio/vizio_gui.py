@@ -80,6 +80,30 @@ class ExtendedWindow(QtWidgets.QMainWindow):
 
         left.addLayout(pair_row)
 
+        # Saved devices list (allow multiple TVs to be stored)
+        left.addWidget(QtWidgets.QLabel("Saved devices:"))
+        self.saved_devices_list = QtWidgets.QListWidget()
+        left.addWidget(self.saved_devices_list)
+
+        saved_row = QtWidgets.QHBoxLayout()
+        save_btn = QtWidgets.QPushButton("Save Selected")
+        save_btn.clicked.connect(self.save_selected_device)
+        saved_row.addWidget(save_btn)
+        remove_btn = QtWidgets.QPushButton("Remove Saved")
+        remove_btn.clicked.connect(self.remove_saved_device)
+        saved_row.addWidget(remove_btn)
+        left.addLayout(saved_row)
+
+        # load saved devices from disk
+        try:
+            self.saved_devices_path = __import__('os').path.join(__import__('os').path.dirname(__file__), 'devices.json')
+        except Exception:
+            self.saved_devices_path = 'devices.json'
+        self.load_saved_devices()
+
+        # when a saved device is selected, handle it
+        self.saved_devices_list.itemSelectionChanged.connect(self.on_saved_selected)
+
         main_layout.addLayout(left, 1)
 
         # Right: controls and output
@@ -245,6 +269,81 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             item = QtWidgets.QListWidgetItem(f"{getattr(dev, 'name', '')} ({getattr(dev, 'ip', '')})")
             item.setData(Qt.UserRole, dev)
             self.devices_list.addItem(item)
+
+    def load_saved_devices(self):
+        import json, os
+        self.saved_devices = []
+        try:
+            if os.path.exists(self.saved_devices_path):
+                with open(self.saved_devices_path, 'r', encoding='utf-8') as fh:
+                    self.saved_devices = json.load(fh) or []
+        except Exception:
+            self.saved_devices = []
+
+        self.saved_devices_list.clear()
+        for dev in self.saved_devices:
+            name = f"{dev.get('name', '')} ({dev.get('ip', '')})"
+            item = QtWidgets.QListWidgetItem(name)
+            item.setData(Qt.UserRole, dev)
+            self.saved_devices_list.addItem(item)
+
+    def save_saved_devices(self):
+        import json
+        try:
+            with open(self.saved_devices_path, 'w', encoding='utf-8') as fh:
+                json.dump(self.saved_devices, fh, indent=2)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Save Error", f"Failed to save devices: {e}")
+
+    def save_selected_device(self):
+        # take current selected discovery device and save minimal info
+        items = self.devices_list.selectedItems()
+        if not items:
+            QtWidgets.QMessageBox.warning(self, "Save Selected", "No discovered device selected to save")
+            return
+        dev = items[0].data(Qt.UserRole)
+        dev_dict = {
+            'name': getattr(dev, 'name', ''),
+            'ip': getattr(dev, 'ip', ''),
+            'port': getattr(dev, 'port', None),
+            'device_type': self.device_type_combo.currentText(),
+            'auth_token': self.auth_token_edit.text().strip(),
+        }
+        # avoid duplicates by ip
+        if any(d.get('ip') == dev_dict['ip'] and d.get('port') == dev_dict['port'] for d in self.saved_devices):
+            QtWidgets.QMessageBox.information(self, "Save Selected", "Device already saved")
+            return
+        self.saved_devices.append(dev_dict)
+        self.save_saved_devices()
+        self.load_saved_devices()
+        QtWidgets.QMessageBox.information(self, "Save Selected", "Device saved")
+
+    def remove_saved_device(self):
+        items = self.saved_devices_list.selectedItems()
+        if not items:
+            QtWidgets.QMessageBox.warning(self, "Remove Saved", "No saved device selected")
+            return
+        dev = items[0].data(Qt.UserRole)
+        self.saved_devices = [d for d in self.saved_devices if not (d.get('ip') == dev.get('ip') and d.get('port') == dev.get('port'))]
+        self.save_saved_devices()
+        self.load_saved_devices()
+        QtWidgets.QMessageBox.information(self, "Remove Saved", "Saved device removed")
+
+    def on_saved_selected(self):
+        items = self.saved_devices_list.selectedItems()
+        if not items:
+            return
+        dev = items[0].data(Qt.UserRole)
+        # set selected_device to the dict so connect_selected can use it
+        self.selected_device = dev
+        self.status_label.setText(f"Selected (saved): {dev.get('name', '')} @ {dev.get('ip', '')}")
+        # populate auth token and device type from saved
+        if dev.get('auth_token'):
+            self.auth_token_edit.setText(dev.get('auth_token'))
+        if dev.get('device_type'):
+            idx = self.device_type_combo.findText(dev.get('device_type'))
+            if idx >= 0:
+                self.device_type_combo.setCurrentIndex(idx)
 
     def on_device_selected(self):
         items = self.devices_list.selectedItems()
