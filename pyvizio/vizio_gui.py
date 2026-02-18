@@ -8,11 +8,11 @@ from typing import Optional
 
 try:
     from PyQt5 import QtWidgets
-    from PyQt5.QtCore import Qt
+    from PyQt5.QtCore import Qt, pyqtSignal
 except Exception:
     try:
         from PySide2 import QtWidgets
-        from PySide2.QtCore import Qt
+        from PySide2.QtCore import Qt, Signal as pyqtSignal
     except Exception:
         raise ImportError("PyQt5 or PySide2 is required to run the GUI")
 
@@ -21,6 +21,8 @@ from pyvizio.helpers import async_to_sync
 
 
 class ExtendedWindow(QtWidgets.QMainWindow):
+    devices_discovered = pyqtSignal(object)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("pyvizio GUI - Extended")
@@ -126,6 +128,11 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         main_layout.addLayout(left, 1)
 
         # Right: controls and output
+        # connect discovery signal
+        self.devices_discovered.connect(self.on_devices_discovered)
+        # start background discovery shortly after startup
+        import threading
+        threading.Thread(target=self._background_discover, daemon=True).start()
         right = QtWidgets.QVBoxLayout()
 
         self.status_label = QtWidgets.QLabel("No device selected")
@@ -296,6 +303,7 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             w.setEnabled(enabled)
 
     def discover_devices(self):
+        # synchronous discovery from UI
         self.devices_list.clear()
         try:
             devices = Vizio.discovery_zeroconf(5)
@@ -309,6 +317,28 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             item = QtWidgets.QListWidgetItem(f"{getattr(dev, 'name', '')} ({getattr(dev, 'ip', '')})")
             item.setData(Qt.UserRole, dev)
             self.devices_list.addItem(item)
+
+    def _background_discover(self):
+        # run discovery in background thread and emit results
+        try:
+            devices = Vizio.discovery_zeroconf(5)
+            if not devices:
+                devices = Vizio.discovery_ssdp(5)
+        except Exception:
+            devices = []
+        self.devices_discovered.emit(devices)
+
+    def on_devices_discovered(self, devices):
+        # update UI with discovered devices (runs in main thread via signal)
+        if not devices:
+            self.auth_status.setText("Background discovery found no devices")
+            return
+        self.devices_list.clear()
+        for dev in devices:
+            item = QtWidgets.QListWidgetItem(f"{getattr(dev, 'name', '')} ({getattr(dev, 'ip', '')})")
+            item.setData(Qt.UserRole, dev)
+            self.devices_list.addItem(item)
+        self.auth_status.setText(f"Background discovery: found {len(devices)} device(s)")
 
     def load_saved_devices(self):
         import json, os
