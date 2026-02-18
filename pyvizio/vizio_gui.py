@@ -55,6 +55,8 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         form.addRow("Auth Token:", self.auth_token_edit)
         # keep displayed token in sync and allow easy copy/paste
         self.auth_token_edit.textChanged.connect(self.on_auth_token_changed)
+        # also enable controls automatically when a token exists
+        self.auth_token_edit.textChanged.connect(lambda t: self.set_controls_enabled(bool(t.strip())))
 
         # Displayed (read-only) token and copy button
         display_h = QtWidgets.QHBoxLayout()
