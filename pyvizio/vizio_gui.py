@@ -523,6 +523,8 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             except Exception:
                 pass
             self.auth_status.setText(f"Paired successfully. Auth token set.")
+            # enable controls now that we have auth
+            self.set_controls_enabled(True)
         else:
             # Fallback: if user already filled an auth token manually, accept it
             manual_token = self.auth_token_edit.text().strip()
@@ -534,6 +536,7 @@ class ExtendedWindow(QtWidgets.QMainWindow):
                 except Exception:
                     pass
                 self.auth_status.setText("No token returned from device; using manually-entered Auth Token")
+                self.set_controls_enabled(True)
             else:
                 self.auth_status.setText("Pair Finish: No auth token returned")
 
