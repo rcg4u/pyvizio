@@ -220,3 +220,25 @@ pyvizio --ip={ip:port} --device_type={device_type} --auth={auth_code} get-curren
 
 Thanks for great research uploaded [here](https://github.com/exiva/Vizio_SmartCast_API) and 
 absolutely awesome SSDP discovery [snippet](https://gist.github.com/dankrause/6000248)
+
+## GUI (PyQt)
+
+A simple PyQt-based GUI is included to discover, pair with, and control Vizio devices.
+
+- Requirements: install PyQt5 (pip install PyQt5) or PySide2.
+- Run: python pyvizio/vizio_gui.py (or python -m pyvizio.vizio_gui) to launch the app.
+
+Features:
+- Background discovery on startup (Zeroconf then SSDP fallback) and a Devices list for discovered and saved devices.
+- Save devices (saved to pyvizio/devices.json) with enriched metadata (serial, ESN, version, UDN) and persisted auth token so you can reconnect without repairing.
+- Pairing workflow exposed in the UI: Start Pair, enter PIN/Challenge token, Finish Pair — the returned auth token is populated automatically and also shown in a Displayed Token field for copy/paste.
+- Inline Auth Status area replaces pop-up notifications and shows pairing/auth messages and discovery status.
+- Full control: power, volume, mute, inputs, launch apps, get status, and a generic command executor for advanced calls.
+- Navigation D-pad and keyboard arrow/Enter support for directional controls.
+- Dark modern theme applied by default; the UI uses a small stylesheet (tweakable in pyvizio/vizio_gui.py).
+
+Notes:
+- Some TV APIs require a valid auth token; if pairing does not return a token, you can paste a token into the Auth Token field and Save the device to persist it.
+- Saved devices store as JSON next to the package (pyvizio/devices.json); make backups if sharing across machines.
+
+If you want this GUI separated into its own package or bundled as an executable (PyInstaller), say so and the repo can be updated.
