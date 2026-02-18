@@ -525,6 +525,25 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             idx = self.device_type_combo.findText(dev.get('device_type'))
             if idx >= 0:
                 self.device_type_combo.setCurrentIndex(idx)
+
+        # Populate Manual Connect fields (IP, Name, Auth) from saved device
+        try:
+            port = dev.get('port')
+            ip = dev.get('ip') or ''
+            ip_text = f"{ip}:{port}" if port else ip
+            self.manual_ip_edit.setText(ip_text or "")
+        except Exception:
+            pass
+        try:
+            self.manual_name_edit.setText(dev.get('name', '') or "")
+        except Exception:
+            pass
+        try:
+            if dev.get('auth_token'):
+                self.manual_auth_edit.setText(dev.get('auth_token'))
+        except Exception:
+            pass
+
         # load favorites if present
         self.favorites = dev.get('favorites', []) or []
         try:
