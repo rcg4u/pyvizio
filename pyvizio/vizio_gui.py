@@ -128,11 +128,6 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         main_layout.addLayout(left, 1)
 
         # Right: controls and output
-        # connect discovery signal
-        self.devices_discovered.connect(self.on_devices_discovered)
-        # start background discovery shortly after startup
-        import threading
-        threading.Thread(target=self._background_discover, daemon=True).start()
         right = QtWidgets.QVBoxLayout()
 
         self.status_label = QtWidgets.QLabel("No device selected")
