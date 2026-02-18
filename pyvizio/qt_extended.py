@@ -319,14 +319,28 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.output.append("\n".join(out))
 
     def pair_start(self):
+        # start pairing against the selected device (not localhost)
+        if not self.selected_device:
+            QtWidgets.QMessageBox.warning(self, "Pair", "No device selected")
+            return
+
+        ip = getattr(self.selected_device, 'ip', None)
+        port = getattr(self.selected_device, 'port', None)
+        if port:
+            ip = f"{ip}:{port}"
+
         try:
-            # use Vizio.sync start_pair
-            temp = Vizio("pyvizio-gui", "127.0.0.1", "temp").start_pair()
+            temp_v = Vizio("pyvizio-gui", ip, getattr(self.selected_device, 'name', ''), "", self.device_type_combo.currentText(), timeout=5)
+            temp = temp_v.start_pair()
             # start_pair returns BeginPairResponse with ch_type and token attributes
             if temp is not None:
                 self.challenge_type_spin.setValue(int(getattr(temp, 'ch_type', 0) or 0))
                 self.challenge_token_edit.setText(str(getattr(temp, 'token', '')))
-                QtWidgets.QMessageBox.information(self, "Pair Started", f"Challenge type: {getattr(temp, 'ch_type', '')}\nToken: {getattr(temp, 'token', '')}")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Pair Started",
+                    f"Challenge type: {getattr(temp, 'ch_type', '')}\nToken: {getattr(temp, 'token', '')}",
+                )
             else:
                 QtWidgets.QMessageBox.warning(self, "Pair", "Start pair returned no data")
         except Exception as e:
