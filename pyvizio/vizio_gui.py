@@ -204,6 +204,27 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         cmds_group.setLayout(cmds_layout)
         right.addWidget(cmds_group)
 
+        # Directional pad (arrow keys + OK)
+        nav_group = QtWidgets.QGroupBox("Navigation")
+        nav_layout = QtWidgets.QGridLayout()
+        self.nav_up = QtWidgets.QPushButton("↑")
+        self.nav_up.clicked.connect(lambda: self.send_direction('UP'))
+        nav_layout.addWidget(self.nav_up, 0, 1)
+        self.nav_left = QtWidgets.QPushButton("←")
+        self.nav_left.clicked.connect(lambda: self.send_direction('LEFT'))
+        nav_layout.addWidget(self.nav_left, 1, 0)
+        self.nav_ok = QtWidgets.QPushButton("OK")
+        self.nav_ok.clicked.connect(lambda: self.send_direction('OK'))
+        nav_layout.addWidget(self.nav_ok, 1, 1)
+        self.nav_right = QtWidgets.QPushButton("→")
+        self.nav_right.clicked.connect(lambda: self.send_direction('RIGHT'))
+        nav_layout.addWidget(self.nav_right, 1, 2)
+        self.nav_down = QtWidgets.QPushButton("↓")
+        self.nav_down.clicked.connect(lambda: self.send_direction('DOWN'))
+        nav_layout.addWidget(self.nav_down, 2, 1)
+        nav_group.setLayout(nav_layout)
+        right.addWidget(nav_group)
+
         # Inputs and Apps
         io_layout = QtWidgets.QHBoxLayout()
         inputs_box = QtWidgets.QVBoxLayout()
@@ -627,6 +648,41 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.output.append(f"> {txt} -> {res}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Command Error", str(e))
+
+    def send_direction(self, key_name: str):
+        # Send navigation key via remote API
+        if not self.vizio:
+            self.auth_status.setText("No device connected to send navigation commands")
+            return
+        try:
+            # use the Vizio.remote method
+            res = self.vizio.remote(key_name)
+            self.output.append(f"> NAV {key_name} -> {res}")
+        except Exception as e:
+            self.auth_status.setText(f"Navigation error: {e}")
+
+    def keyPressEvent(self, event):
+        # Capture arrow keys and Enter to control the TV
+        try:
+            key = event.key()
+            if key == Qt.Key_Up:
+                self.send_direction('UP')
+                return
+            if key == Qt.Key_Down:
+                self.send_direction('DOWN')
+                return
+            if key == Qt.Key_Left:
+                self.send_direction('LEFT')
+                return
+            if key == Qt.Key_Right:
+                self.send_direction('RIGHT')
+                return
+            if key in (Qt.Key_Return, Qt.Key_Enter):
+                self.send_direction('OK')
+                return
+        except Exception:
+            pass
+        super().keyPressEvent(event)
 
 
     def on_auth_token_changed(self, text):
