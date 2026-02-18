@@ -254,6 +254,11 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.nav_down = QtWidgets.QPushButton("↓")
         self.nav_down.clicked.connect(lambda: self.send_direction('DOWN'))
         nav_layout.addWidget(self.nav_down, 2, 1)
+        # Keyboard control toggle (enable arrow keys + Alt as OK)
+        self.keyboard_ctrl_chk = QtWidgets.QCheckBox("Enable keyboard (Arrows + Alt=OK)")
+        self.keyboard_ctrl_chk.setChecked(False)
+        self.keyboard_ctrl_chk.toggled.connect(self.set_keyboard_enabled)
+        nav_layout.addWidget(self.keyboard_ctrl_chk, 3, 0, 1, 3)
         nav_group.setLayout(nav_layout)
         right.addWidget(nav_group)
 
@@ -1119,8 +1124,10 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.auth_status.setText(f"Navigation error: {e}")
 
     def keyPressEvent(self, event):
-        # Capture arrow keys and Enter to control the TV
+        # Capture arrow keys and Enter to control the TV when keyboard control enabled
         try:
+            if not getattr(self, 'keyboard_control_enabled', False):
+                return super().keyPressEvent(event)
             key = event.key()
             if key == Qt.Key_Up:
                 self.send_direction('UP')
@@ -1134,12 +1141,27 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             if key == Qt.Key_Right:
                 self.send_direction('RIGHT')
                 return
+            # Map Alt (including Right Alt on many layouts) to OK/select
+            if key == Qt.Key_Alt:
+                self.send_direction('OK')
+                return
             if key in (Qt.Key_Return, Qt.Key_Enter):
                 self.send_direction('OK')
                 return
         except Exception:
             pass
         super().keyPressEvent(event)
+
+    def set_keyboard_enabled(self, enabled: bool):
+        # Enable or disable keyboard navigation handling
+        try:
+            self.keyboard_control_enabled = bool(enabled)
+            if enabled:
+                self.auth_status.setText("Keyboard control enabled (Arrows + Alt=OK)")
+            else:
+                self.auth_status.setText("Keyboard control disabled")
+        except Exception:
+            pass
 
 
     def on_auth_token_changed(self, text):
