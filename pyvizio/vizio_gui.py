@@ -700,8 +700,25 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.auth_status.setText(f"Copy failed: {e}")
 
 
+def apply_dark_theme(app):
+    # Minimal dark stylesheet
+    sheet = """
+    QWidget { background: #2b2b2b; color: #dcdcdc; font-family: Segoe UI, Arial; }
+    QLineEdit, QTextEdit, QComboBox, QSpinBox { background: #3c3c3c; color: #ffffff; border: 1px solid #555555; }
+    QPushButton { background: #4b6eaf; color: white; border-radius: 4px; padding: 6px; }
+    QPushButton:disabled { background: #555555; color: #999999; }
+    QGroupBox { border: 1px solid #444444; margin-top: 6px; }
+    QGroupBox::title { subcontrol-origin: margin; left: 8px; padding: 0 3px 0 3px; }
+    QLabel { color: #dcdcdc; }
+    QListWidget { background: #313131; border: 1px solid #444; }
+    QScrollBar:vertical { background: #262626; width: 12px; }
+    """
+    app.setStyleSheet(sheet)
+
+
 def run_gui():
     app = QtWidgets.QApplication([])
+    apply_dark_theme(app)
     w = ExtendedWindow()
     w.show()
     app.exec_()
