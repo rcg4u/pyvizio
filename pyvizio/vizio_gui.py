@@ -5,6 +5,7 @@ a status type dropdown, and a generic command input to run arbitrary Vizio metho
 """
 
 from typing import Optional
+import threading
 
 try:
     from PyQt5 import QtWidgets
