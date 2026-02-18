@@ -405,7 +405,12 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.auth_token_edit.setText(str(getattr(res, 'auth_token')))
             QtWidgets.QMessageBox.information(self, "Paired", f"Auth token: {getattr(res, 'auth_token')}")
         else:
-            QtWidgets.QMessageBox.warning(self, "Pair Finish", "No auth token returned")
+            # Fallback: if user already filled an auth token manually, accept it
+            manual_token = self.auth_token_edit.text().strip()
+            if manual_token:
+                QtWidgets.QMessageBox.information(self, "Paired (manual)", "No token returned from device, but an auth token is present in the Auth Token field and will be used.")
+            else:
+                QtWidgets.QMessageBox.warning(self, "Pair Finish", "No auth token returned")
 
     def populate_inputs(self):
         if not self.vizio:
