@@ -1,0 +1,493 @@
+"""Extended PyQt GUI for pyvizio with auth/pair and generic command executor.
+
+Adds fields for auth token, PIN, challenge token/type, device type selection,
+a status type dropdown, and a generic command input to run arbitrary Vizio methods.
+"""
+
+from typing import Optional
+
+try:
+    from PyQt5 import QtWidgets
+    from PyQt5.QtCore import Qt
+except Exception:
+    try:
+        from PySide2 import QtWidgets
+        from PySide2.QtCore import Qt
+    except Exception:
+        raise ImportError("PyQt5 or PySide2 is required to run the GUI")
+
+from pyvizio import Vizio, VizioAsync
+from pyvizio.helpers import async_to_sync
+
+
+class ExtendedWindow(QtWidgets.QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("pyvizio GUI - Extended")
+        self.resize(900, 600)
+
+        self.vizio: Optional[Vizio] = None
+        self.selected_device = None
+
+        central = QtWidgets.QWidget()
+        self.setCentralWidget(central)
+
+        main_layout = QtWidgets.QHBoxLayout(central)
+
+        # Left: devices list
+        left = QtWidgets.QVBoxLayout()
+        self.devices_list = QtWidgets.QListWidget()
+        left.addWidget(QtWidgets.QLabel("Discovered devices:"))
+        left.addWidget(self.devices_list)
+
+        discover_btn = QtWidgets.QPushButton("Discover")
+        discover_btn.clicked.connect(self.discover_devices)
+        left.addWidget(discover_btn)
+
+        # Auth / Pairing controls
+        left.addWidget(QtWidgets.QLabel("Auth / Pairing"))
+        form = QtWidgets.QFormLayout()
+        self.device_type_combo = QtWidgets.QComboBox()
+        self.device_type_combo.addItems(["tv", "speaker", "crave360"])
+        form.addRow("Device Type:", self.device_type_combo)
+
+        self.auth_token_edit = QtWidgets.QLineEdit()
+        form.addRow("Auth Token:", self.auth_token_edit)
+
+        self.challenge_type_spin = QtWidgets.QSpinBox()
+        self.challenge_type_spin.setMinimum(0)
+        self.challenge_type_spin.setMaximum(9999)
+        form.addRow("Challenge Type:", self.challenge_type_spin)
+
+        self.challenge_token_edit = QtWidgets.QLineEdit()
+        form.addRow("Challenge Token:", self.challenge_token_edit)
+
+        self.pin_edit = QtWidgets.QLineEdit()
+        form.addRow("PIN:", self.pin_edit)
+
+        left.addLayout(form)
+
+        pair_row = QtWidgets.QHBoxLayout()
+        pair_start_btn = QtWidgets.QPushButton("Start Pair")
+        pair_start_btn.clicked.connect(self.pair_start)
+        pair_row.addWidget(pair_start_btn)
+        pair_stop_btn = QtWidgets.QPushButton("Stop Pair")
+        pair_stop_btn.clicked.connect(self.pair_stop)
+        pair_row.addWidget(pair_stop_btn)
+        pair_finish_btn = QtWidgets.QPushButton("Finish Pair")
+        pair_finish_btn.clicked.connect(self.pair_finish)
+        pair_row.addWidget(pair_finish_btn)
+
+        left.addLayout(pair_row)
+
+        main_layout.addLayout(left, 1)
+
+        # Right: controls and output
+        right = QtWidgets.QVBoxLayout()
+
+        self.status_label = QtWidgets.QLabel("No device selected")
+        right.addWidget(self.status_label)
+
+        connect_row = QtWidgets.QHBoxLayout()
+        self.connect_btn = QtWidgets.QPushButton("Connect Selected")
+        self.connect_btn.clicked.connect(self.connect_selected)
+        connect_row.addWidget(self.connect_btn)
+
+        self.refresh_status_btn = QtWidgets.QPushButton("Refresh Status")
+        self.refresh_status_btn.clicked.connect(self.refresh_status)
+        connect_row.addWidget(self.refresh_status_btn)
+
+        right.addLayout(connect_row)
+
+        # Status type dropdown
+        status_layout = QtWidgets.QHBoxLayout()
+        status_layout.addWidget(QtWidgets.QLabel("Status Type:"))
+        self.status_type_combo = QtWidgets.QComboBox()
+        self.status_type_combo.addItems([
+            "All",
+            "Power",
+            "Volume",
+            "Input",
+            "App",
+            "Charging",
+            "Battery",
+            "Version",
+            "ESN",
+            "Serial",
+        ])
+        status_layout.addWidget(self.status_type_combo)
+        right.addLayout(status_layout)
+
+        # Command buttons
+        cmds_group = QtWidgets.QGroupBox("Quick Commands")
+        cmds_layout = QtWidgets.QGridLayout()
+
+        self.power_on_btn = QtWidgets.QPushButton("Power On")
+        self.power_on_btn.clicked.connect(lambda: self.exec_and_show("pow_on"))
+        cmds_layout.addWidget(self.power_on_btn, 0, 0)
+        self.power_off_btn = QtWidgets.QPushButton("Power Off")
+        self.power_off_btn.clicked.connect(lambda: self.exec_and_show("pow_off"))
+        cmds_layout.addWidget(self.power_off_btn, 0, 1)
+        self.power_toggle_btn = QtWidgets.QPushButton("Power Toggle")
+        self.power_toggle_btn.clicked.connect(lambda: self.exec_and_show("pow_toggle"))
+        cmds_layout.addWidget(self.power_toggle_btn, 0, 2)
+
+        self.vol_up_btn = QtWidgets.QPushButton("Vol +")
+        self.vol_up_btn.clicked.connect(lambda: self.exec_and_show("vol_up", 1))
+        cmds_layout.addWidget(self.vol_up_btn, 1, 0)
+        self.vol_down_btn = QtWidgets.QPushButton("Vol -")
+        self.vol_down_btn.clicked.connect(lambda: self.exec_and_show("vol_down", 1))
+        cmds_layout.addWidget(self.vol_down_btn, 1, 1)
+
+        self.ch_up_btn = QtWidgets.QPushButton("Ch +")
+        self.ch_up_btn.clicked.connect(lambda: self.exec_and_show("ch_up", 1))
+        cmds_layout.addWidget(self.ch_up_btn, 2, 0)
+        self.ch_down_btn = QtWidgets.QPushButton("Ch -")
+        self.ch_down_btn.clicked.connect(lambda: self.exec_and_show("ch_down", 1))
+        cmds_layout.addWidget(self.ch_down_btn, 2, 1)
+        self.ch_prev_btn = QtWidgets.QPushButton("Ch Prev")
+        self.ch_prev_btn.clicked.connect(lambda: self.exec_and_show("ch_prev"))
+        cmds_layout.addWidget(self.ch_prev_btn, 2, 2)
+
+        self.mute_toggle_btn = QtWidgets.QPushButton("Mute Toggle")
+        self.mute_toggle_btn.clicked.connect(lambda: self.exec_and_show("mute_toggle"))
+        cmds_layout.addWidget(self.mute_toggle_btn, 3, 0)
+
+        self.play_btn = QtWidgets.QPushButton("Play")
+        self.play_btn.clicked.connect(lambda: self.exec_and_show("play"))
+        cmds_layout.addWidget(self.play_btn, 3, 1)
+        self.pause_btn = QtWidgets.QPushButton("Pause")
+        self.pause_btn.clicked.connect(lambda: self.exec_and_show("pause"))
+        cmds_layout.addWidget(self.pause_btn, 3, 2)
+
+        cmds_group.setLayout(cmds_layout)
+        right.addWidget(cmds_group)
+
+        # Inputs and Apps
+        io_layout = QtWidgets.QHBoxLayout()
+        inputs_box = QtWidgets.QVBoxLayout()
+        inputs_box.addWidget(QtWidgets.QLabel("Inputs:"))
+        self.inputs_combo = QtWidgets.QComboBox()
+        inputs_box.addWidget(self.inputs_combo)
+        self.input_btn = QtWidgets.QPushButton("Set Input")
+        self.input_btn.clicked.connect(self.set_input)
+        inputs_box.addWidget(self.input_btn)
+        io_layout.addLayout(inputs_box)
+
+        apps_box = QtWidgets.QVBoxLayout()
+        apps_box.addWidget(QtWidgets.QLabel("Apps:"))
+        self.apps_combo = QtWidgets.QComboBox()
+        apps_box.addWidget(self.apps_combo)
+        self.launch_app_btn = QtWidgets.QPushButton("Launch App")
+        self.launch_app_btn.clicked.connect(self.launch_app)
+        apps_box.addWidget(self.launch_app_btn)
+        io_layout.addLayout(apps_box)
+
+        right.addLayout(io_layout)
+
+        # Generic command executor
+        right.addWidget(QtWidgets.QLabel("Execute arbitrary command (e.g. get_esn, get_version, setting audio Bass 5):"))
+        cmd_row = QtWidgets.QHBoxLayout()
+        self.cmd_input = QtWidgets.QLineEdit()
+        cmd_row.addWidget(self.cmd_input)
+        self.cmd_run_btn = QtWidgets.QPushButton("Run")
+        self.cmd_run_btn.clicked.connect(self.run_command)
+        cmd_row.addWidget(self.cmd_run_btn)
+        right.addLayout(cmd_row)
+
+        # Output box
+        right.addWidget(QtWidgets.QLabel("Output:"))
+        self.output = QtWidgets.QTextEdit()
+        self.output.setReadOnly(True)
+        right.addWidget(self.output, 1)
+
+        main_layout.addLayout(right, 2)
+
+        # Signals
+        self.devices_list.itemSelectionChanged.connect(self.on_device_selected)
+        self.set_controls_enabled(False)
+
+    def set_controls_enabled(self, enabled: bool):
+        for w in [
+            self.connect_btn,
+            self.refresh_status_btn,
+            self.power_on_btn,
+            self.power_off_btn,
+            self.power_toggle_btn,
+            self.vol_up_btn,
+            self.vol_down_btn,
+            self.ch_up_btn,
+            self.ch_down_btn,
+            self.ch_prev_btn,
+            self.mute_toggle_btn,
+            self.play_btn,
+            self.pause_btn,
+            self.inputs_combo,
+            self.input_btn,
+            self.apps_combo,
+            self.launch_app_btn,
+            self.cmd_input,
+            self.cmd_run_btn,
+        ]:
+            w.setEnabled(enabled)
+
+    def discover_devices(self):
+        self.devices_list.clear()
+        try:
+            devices = Vizio.discovery_zeroconf(5)
+            if not devices:
+                devices = Vizio.discovery_ssdp(5)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Discover Error", str(e))
+            return
+
+        for dev in devices:
+            item = QtWidgets.QListWidgetItem(f"{getattr(dev, 'name', '')} ({getattr(dev, 'ip', '')})")
+            item.setData(Qt.UserRole, dev)
+            self.devices_list.addItem(item)
+
+    def on_device_selected(self):
+        items = self.devices_list.selectedItems()
+        if not items:
+            self.selected_device = None
+            self.status_label.setText("No device selected")
+            self.set_controls_enabled(False)
+            return
+
+        self.selected_device = items[0].data(Qt.UserRole)
+        self.status_label.setText(f"Selected: {getattr(self.selected_device, 'name', '')} @ {getattr(self.selected_device, 'ip', '')}")
+
+    def connect_selected(self):
+        if not self.selected_device:
+            return
+        ip = getattr(self.selected_device, 'ip', None)
+        port = getattr(self.selected_device, 'port', None)
+        if port:
+            ip = f"{ip}:{port}"
+
+        auth_token = self.auth_token_edit.text().strip()
+        device_type = self.device_type_combo.currentText().strip()
+
+        try:
+            self.vizio = Vizio("pyvizio-gui", ip, getattr(self.selected_device, 'name', ''), auth_token, device_type, timeout=5)
+        except Exception as e:
+            QtWidgets.QMessageBox.critical(self, "Connect Error", str(e))
+            return
+
+        self.set_controls_enabled(True)
+        self.refresh_status()
+        self.populate_inputs()
+        self.populate_apps()
+
+    def refresh_status(self):
+        if not self.vizio:
+            return
+        stype = self.status_type_combo.currentText()
+        out = []
+        try:
+            if stype in ("All", "Power"):
+                power = self.vizio.get_power_state()
+                out.append(f"Power: {power}")
+            if stype in ("All", "Volume"):
+                vol = self.vizio.get_current_volume()
+                out.append(f"Volume: {vol}")
+            if stype in ("All", "Input"):
+                inp = self.vizio.get_current_input()
+                out.append(f"Input: {inp}")
+            if stype in ("All", "App"):
+                app = self.vizio.get_current_app()
+                out.append(f"App: {app}")
+            if stype in ("All", "Charging"):
+                ch = self.vizio.get_charging_status()
+                out.append(f"Charging: {ch}")
+            if stype in ("All", "Battery"):
+                batt = self.vizio.get_battery_level()
+                out.append(f"Battery: {batt}")
+            if stype in ("All", "Version"):
+                ver = self.vizio.get_version()
+                out.append(f"Version: {ver}")
+            if stype in ("All", "ESN"):
+                esn = self.vizio.get_esn()
+                out.append(f"ESN: {esn}")
+            if stype in ("All", "Serial"):
+                sn = self.vizio.get_serial_number()
+                out.append(f"Serial: {sn}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Status Error", str(e))
+            return
+
+        self.output.append("\n".join(out))
+
+    def pair_start(self):
+        try:
+            # use Vizio.sync start_pair
+            temp = Vizio("pyvizio-gui", "127.0.0.1", "temp").start_pair()
+            # start_pair returns BeginPairResponse with ch_type and token attributes
+            if temp is not None:
+                self.challenge_type_spin.setValue(int(getattr(temp, 'ch_type', 0) or 0))
+                self.challenge_token_edit.setText(str(getattr(temp, 'token', '')))
+                QtWidgets.QMessageBox.information(self, "Pair Started", f"Challenge type: {getattr(temp, 'ch_type', '')}\nToken: {getattr(temp, 'token', '')}")
+            else:
+                QtWidgets.QMessageBox.warning(self, "Pair", "Start pair returned no data")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Pair Error", str(e))
+
+    def pair_stop(self):
+        if not self.vizio:
+            # attempt to create temp ephemeral Vizio if ip from selected device is available
+            if not self.selected_device:
+                QtWidgets.QMessageBox.warning(self, "Pair Stop", "No device selected")
+                return
+            ip = getattr(self.selected_device, 'ip', None)
+            port = getattr(self.selected_device, 'port', None)
+            if port:
+                ip = f"{ip}:{port}"
+            try:
+                Vizio("pyvizio-gui", ip, getattr(self.selected_device, 'name', '')).stop_pair()
+                QtWidgets.QMessageBox.information(self, "Pair Stop", "Pair stop sent")
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "Pair Stop Error", str(e))
+            return
+
+        try:
+            self.vizio.stop_pair()
+            QtWidgets.QMessageBox.information(self, "Pair Stop", "Pair stop sent")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Pair Stop Error", str(e))
+
+    def pair_finish(self):
+        # ch_type, token, pin
+        try:
+            ch_type = int(self.challenge_type_spin.value())
+            token = int(self.challenge_token_edit.text().strip()) if self.challenge_token_edit.text().strip() else 0
+            pin = self.pin_edit.text().strip()
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Pair Finish", "Invalid challenge/token values")
+            return
+
+        # Need a Vizio instance to call pair; create temporary using selected device
+        if not self.vizio:
+            if not self.selected_device:
+                QtWidgets.QMessageBox.warning(self, "Pair Finish", "No device selected")
+                return
+            ip = getattr(self.selected_device, 'ip', None)
+            port = getattr(self.selected_device, 'port', None)
+            if port:
+                ip = f"{ip}:{port}"
+            try:
+                temp_v = Vizio("pyvizio-gui", ip, getattr(self.selected_device, 'name', ''), "", self.device_type_combo.currentText(), timeout=5)
+                res = temp_v.pair(ch_type, token, pin)
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "Pair Finish Error", str(e))
+                return
+        else:
+            try:
+                res = self.vizio.pair(ch_type, token, pin)
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(self, "Pair Finish Error", str(e))
+                return
+
+        if res is not None and getattr(res, 'auth_token', None):
+            self.auth_token_edit.setText(str(getattr(res, 'auth_token')))
+            QtWidgets.QMessageBox.information(self, "Paired", f"Auth token: {getattr(res, 'auth_token')}")
+        else:
+            QtWidgets.QMessageBox.warning(self, "Pair Finish", "No auth token returned")
+
+    def populate_inputs(self):
+        if not self.vizio:
+            return
+        try:
+            inputs = self.vizio.get_inputs_list()
+            self.inputs_combo.clear()
+            if inputs:
+                for i in inputs:
+                    name = getattr(i, 'name', None) or getattr(i, 'meta_name', None)
+                    self.inputs_combo.addItem(name)
+        except Exception:
+            pass
+
+    def set_input(self):
+        if not self.vizio:
+            return
+        name = self.inputs_combo.currentText()
+        if not name:
+            return
+        try:
+            self.vizio.set_input(name)
+            self.output.append(f"Set input to {name}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Input Error", str(e))
+
+    def populate_apps(self):
+        try:
+            apps = async_to_sync(VizioAsync.get_apps_list)()
+            self.apps_combo.clear()
+            if apps:
+                for a in apps:
+                    self.apps_combo.addItem(str(a))
+        except Exception:
+            pass
+
+    def launch_app(self):
+        if not self.vizio:
+            return
+        app = self.apps_combo.currentText()
+        if not app:
+            return
+        try:
+            self.vizio.launch_app(app)
+            self.output.append(f"Launched app {app}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Launch Error", str(e))
+
+    def exec_and_show(self, method_name: str, *args):
+        if not self.vizio:
+            QtWidgets.QMessageBox.warning(self, "Execute", "No device connected")
+            return
+        try:
+            meth = getattr(self.vizio, method_name)
+        except AttributeError:
+            QtWidgets.QMessageBox.warning(self, "Execute", f"Unknown method: {method_name}")
+            return
+        try:
+            res = meth(*args)
+            self.output.append(f"> {method_name} {args} -> {res}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Execute Error", str(e))
+
+    def run_command(self):
+        if not self.vizio:
+            QtWidgets.QMessageBox.warning(self, "Command", "No device connected")
+            return
+        txt = self.cmd_input.text().strip()
+        if not txt:
+            return
+        parts = txt.split()
+        cmd = parts[0]
+        args = []
+        for p in parts[1:]:
+            # try int conversion
+            try:
+                args.append(int(p))
+            except ValueError:
+                args.append(p)
+        try:
+            if not hasattr(self.vizio, cmd):
+                QtWidgets.QMessageBox.warning(self, "Command", f"Unknown command: {cmd}")
+                return
+            meth = getattr(self.vizio, cmd)
+            res = meth(*args)
+            self.output.append(f"> {txt} -> {res}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Command Error", str(e))
+
+
+def run_gui():
+    app = QtWidgets.QApplication([])
+    w = ExtendedWindow()
+    w.show()
+    app.exec_()
+
+
+if __name__ == '__main__':
+    run_gui()
