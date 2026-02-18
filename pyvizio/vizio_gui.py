@@ -54,6 +54,11 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.auth_token_edit = QtWidgets.QLineEdit()
         form.addRow("Auth Token:", self.auth_token_edit)
 
+        # Small status area for pairing/auth messages (replaces pop-up notifications)
+        self.auth_status = QtWidgets.QLabel("")
+        self.auth_status.setWordWrap(True)
+        form.addRow("Auth Status:", self.auth_status)
+
         self.challenge_type_spin = QtWidgets.QSpinBox()
         self.challenge_type_spin.setMinimum(0)
         self.challenge_type_spin.setMaximum(9999)
@@ -420,7 +425,7 @@ class ExtendedWindow(QtWidgets.QMainWindow):
     def pair_start(self):
         # start pairing against the selected device (not localhost)
         if not self.selected_device:
-            QtWidgets.QMessageBox.warning(self, "Pair", "No device selected")
+            self.auth_status.setText("No device selected for pairing")
             return
 
         ip = getattr(self.selected_device, 'ip', None)
@@ -435,21 +440,17 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             if temp is not None:
                 self.challenge_type_spin.setValue(int(getattr(temp, 'ch_type', 0) or 0))
                 self.challenge_token_edit.setText(str(getattr(temp, 'token', '')))
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Pair Started",
-                    f"Challenge type: {getattr(temp, 'ch_type', '')}\nToken: {getattr(temp, 'token', '')}",
-                )
+                self.auth_status.setText(f"Pair started: challenge type={getattr(temp, 'ch_type', '')}, token={getattr(temp, 'token', '')}")
             else:
-                QtWidgets.QMessageBox.warning(self, "Pair", "Start pair returned no data")
+                self.auth_status.setText("Start pair returned no data")
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Pair Error", str(e))
+            self.auth_status.setText(f"Pair Error: {e}")
 
     def pair_stop(self):
         if not self.vizio:
             # attempt to create temp ephemeral Vizio if ip from selected device is available
             if not self.selected_device:
-                QtWidgets.QMessageBox.warning(self, "Pair Stop", "No device selected")
+                self.auth_status.setText("No device selected to stop pairing")
                 return
             ip = getattr(self.selected_device, 'ip', None)
             port = getattr(self.selected_device, 'port', None)
@@ -457,16 +458,16 @@ class ExtendedWindow(QtWidgets.QMainWindow):
                 ip = f"{ip}:{port}"
             try:
                 Vizio("pyvizio-gui", ip, getattr(self.selected_device, 'name', '')).stop_pair()
-                QtWidgets.QMessageBox.information(self, "Pair Stop", "Pair stop sent")
+                self.auth_status.setText("Pair stop sent")
             except Exception as e:
-                QtWidgets.QMessageBox.warning(self, "Pair Stop Error", str(e))
+                self.auth_status.setText(f"Pair Stop Error: {e}")
             return
 
         try:
             self.vizio.stop_pair()
-            QtWidgets.QMessageBox.information(self, "Pair Stop", "Pair stop sent")
+            self.auth_status.setText("Pair stop sent")
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Pair Stop Error", str(e))
+            self.auth_status.setText(f"Pair Stop Error: {e}")
 
     def pair_finish(self):
         # ch_type, token, pin
@@ -501,15 +502,28 @@ class ExtendedWindow(QtWidgets.QMainWindow):
                 return
 
         if res is not None and getattr(res, 'auth_token', None):
-            self.auth_token_edit.setText(str(getattr(res, 'auth_token')))
-            QtWidgets.QMessageBox.information(self, "Paired", f"Auth token: {getattr(res, 'auth_token')}")
+            token = str(getattr(res, 'auth_token'))
+            self.auth_token_edit.setText(token)
+            # if currently connected, update the Vizio instance to use the new token
+            try:
+                if self.vizio:
+                    self.vizio._auth_token = token
+            except Exception:
+                pass
+            self.auth_status.setText(f"Paired successfully. Auth token set.")
         else:
             # Fallback: if user already filled an auth token manually, accept it
             manual_token = self.auth_token_edit.text().strip()
             if manual_token:
-                QtWidgets.QMessageBox.information(self, "Paired (manual)", "No token returned from device, but an auth token is present in the Auth Token field and will be used.")
+                # ensure current Vizio instance uses it
+                try:
+                    if self.vizio:
+                        self.vizio._auth_token = manual_token
+                except Exception:
+                    pass
+                self.auth_status.setText("No token returned from device; using manually-entered Auth Token")
             else:
-                QtWidgets.QMessageBox.warning(self, "Pair Finish", "No auth token returned")
+                self.auth_status.setText("Pair Finish: No auth token returned")
 
     def populate_inputs(self):
         if not self.vizio:
