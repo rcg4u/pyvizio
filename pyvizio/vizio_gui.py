@@ -53,6 +53,18 @@ class ExtendedWindow(QtWidgets.QMainWindow):
 
         self.auth_token_edit = QtWidgets.QLineEdit()
         form.addRow("Auth Token:", self.auth_token_edit)
+        # keep displayed token in sync and allow easy copy/paste
+        self.auth_token_edit.textChanged.connect(self.on_auth_token_changed)
+
+        # Displayed (read-only) token and copy button
+        display_h = QtWidgets.QHBoxLayout()
+        self.display_token_edit = QtWidgets.QLineEdit()
+        self.display_token_edit.setReadOnly(True)
+        display_h.addWidget(self.display_token_edit)
+        self.copy_token_btn = QtWidgets.QPushButton("Copy")
+        self.copy_token_btn.clicked.connect(self.copy_token)
+        display_h.addWidget(self.copy_token_btn)
+        form.addRow("Displayed Token:", display_h)
 
         # Small status area for pairing/auth messages (replaces pop-up notifications)
         self.auth_status = QtWidgets.QLabel("")
@@ -612,6 +624,21 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.output.append(f"> {txt} -> {res}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Command Error", str(e))
+
+
+    def on_auth_token_changed(self, text):
+        # update displayed token whenever auth field changes
+        try:
+            self.display_token_edit.setText(text)
+        except Exception:
+            pass
+
+    def copy_token(self):
+        try:
+            QtWidgets.QApplication.clipboard().setText(self.display_token_edit.text())
+            self.auth_status.setText("Auth token copied to clipboard")
+        except Exception as e:
+            self.auth_status.setText(f"Copy failed: {e}")
 
 
 def run_gui():
