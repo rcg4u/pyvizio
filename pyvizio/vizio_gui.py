@@ -149,6 +149,22 @@ class ExtendedWindow(QtWidgets.QMainWindow):
 
         right.addLayout(connect_row)
 
+        # Manual connect area (for networks without working discovery)
+        manual_row = QtWidgets.QHBoxLayout()
+        self.manual_ip_edit = QtWidgets.QLineEdit()
+        self.manual_ip_edit.setPlaceholderText("IP[:PORT]")
+        manual_row.addWidget(self.manual_ip_edit)
+        self.manual_name_edit = QtWidgets.QLineEdit()
+        self.manual_name_edit.setPlaceholderText("Name (optional)")
+        manual_row.addWidget(self.manual_name_edit)
+        self.manual_auth_edit = QtWidgets.QLineEdit()
+        self.manual_auth_edit.setPlaceholderText("Auth token (optional)")
+        manual_row.addWidget(self.manual_auth_edit)
+        self.manual_connect_btn = QtWidgets.QPushButton("Manual Connect")
+        self.manual_connect_btn.clicked.connect(self.manual_connect)
+        manual_row.addWidget(self.manual_connect_btn)
+        right.addLayout(manual_row)
+
         # Status type dropdown
         status_layout = QtWidgets.QHBoxLayout()
         status_layout.addWidget(QtWidgets.QLabel("Status Type:"))
@@ -493,6 +509,27 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.refresh_status()
         self.populate_inputs()
         self.populate_apps()
+
+    def manual_connect(self):
+        ip_text = self.manual_ip_edit.text().strip()
+        if not ip_text:
+            self.auth_status.setText("Enter IP to manually connect")
+            return
+        name = self.manual_name_edit.text().strip() or "Manual Vizio"
+        auth = self.manual_auth_edit.text().strip()
+        device_type = self.device_type_combo.currentText().strip()
+        try:
+            # Create Vizio instance using provided IP (may include :port)
+            self.vizio = Vizio("pyvizio-gui", ip_text, name, auth, device_type, timeout=5)
+            if auth:
+                self.auth_token_edit.setText(auth)
+            self.set_controls_enabled(bool(auth))
+            self.auth_status.setText(f"Connected to {ip_text}")
+            self.status_label.setText(f"Connected: {name} @ {ip_text}")
+            self.populate_inputs()
+            self.populate_apps()
+        except Exception as e:
+            self.auth_status.setText(f"Manual connect error: {e}")
 
     def refresh_status(self):
         if not self.vizio:
