@@ -366,27 +366,73 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Save Error", f"Failed to save devices: {e}")
 
     def save_selected_device(self):
-        # take current selected discovery device and save minimal info
+        # take current selected discovery device and save full info needed for auth
         items = self.devices_list.selectedItems()
         if not items:
-            QtWidgets.QMessageBox.warning(self, "Save Selected", "No discovered device selected to save")
+            self.auth_status.setText("No discovered device selected to save")
             return
         dev = items[0].data(Qt.UserRole)
+        ip = getattr(dev, 'ip', '')
+        port = getattr(dev, 'port', None)
         dev_dict = {
             'name': getattr(dev, 'name', ''),
-            'ip': getattr(dev, 'ip', ''),
-            'port': getattr(dev, 'port', None),
+            'ip': ip,
+            'port': port,
             'device_type': self.device_type_combo.currentText(),
             'auth_token': self.auth_token_edit.text().strip(),
+            'saved_at': __import__('datetime').datetime.utcnow().isoformat(),
         }
-        # avoid duplicates by ip
-        if any(d.get('ip') == dev_dict['ip'] and d.get('port') == dev_dict['port'] for d in self.saved_devices):
-            QtWidgets.QMessageBox.information(self, "Save Selected", "Device already saved")
-            return
-        self.saved_devices.append(dev_dict)
+
+        # attempt to enrich with serial, esn, version (helps identify device and validate token)
+        try:
+            temp_v = None
+            # prefer existing connected vizio if it matches
+            if self.vizio and getattr(self.selected_device, 'ip', None) == ip:
+                temp_v = self.vizio
+            else:
+                ip_with_port = f"{ip}:{port}" if port else ip
+                temp_v = Vizio("pyvizio-gui", ip_with_port, getattr(dev, 'name', ''), "", self.device_type_combo.currentText(), timeout=3)
+
+            try:
+                serial = temp_v.get_serial_number()
+                if serial:
+                    dev_dict['serial_number'] = serial
+            except Exception:
+                pass
+            try:
+                esn = temp_v.get_esn()
+                if esn:
+                    dev_dict['esn'] = esn
+            except Exception:
+                pass
+            try:
+                version = temp_v.get_version()
+                if version:
+                    dev_dict['version'] = version
+            except Exception:
+                pass
+        except Exception:
+            # ignore enrich failures
+            pass
+
+        # include any unique id from discovery object if available
+        udn = getattr(dev, 'UDN', None) or getattr(dev, 'udn', None) or getattr(dev, 'UDN', None)
+        if udn:
+            dev_dict['udn'] = udn
+
+        # avoid duplicates by ip/port; replace existing entry if present
+        replaced = False
+        for i, d in enumerate(self.saved_devices):
+            if d.get('ip') == dev_dict['ip'] and d.get('port') == dev_dict['port']:
+                self.saved_devices[i] = dev_dict
+                replaced = True
+                break
+        if not replaced:
+            self.saved_devices.append(dev_dict)
+
         self.save_saved_devices()
         self.load_saved_devices()
-        QtWidgets.QMessageBox.information(self, "Save Selected", "Device saved")
+        self.auth_status.setText("Device saved with auth info (if available)")
 
     def remove_saved_device(self):
         items = self.saved_devices_list.selectedItems()
