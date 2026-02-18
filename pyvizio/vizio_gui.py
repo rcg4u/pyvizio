@@ -319,14 +319,18 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             w.setEnabled(enabled)
 
     def discover_devices(self):
-        # synchronous discovery from UI
+        # synchronous discovery from UI with verbose status updates
         self.devices_list.clear()
         try:
+            self.auth_status.setText("Discovery: starting (UI)...")
             devices = Vizio.discovery_zeroconf(5)
+            self.auth_status.setText(f"Discovery: zeroconf found {len(devices) if devices else 0}")
             if not devices:
+                self.auth_status.setText("Discovery: zeroconf found none, trying SSDP...")
                 devices = Vizio.discovery_ssdp(5)
+                self.auth_status.setText(f"Discovery: ssdp found {len(devices) if devices else 0}")
         except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Discover Error", str(e))
+            self.auth_status.setText(f"Discover Error: {e}")
             return
 
         for dev in devices:
@@ -335,26 +339,49 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.devices_list.addItem(item)
 
     def _background_discover(self):
-        # run discovery in background thread and emit results
+        # run discovery in background thread and emit results along with a log
+        log_lines = []
+        devices = []
         try:
+            log_lines.append("Background discovery starting...")
             devices = Vizio.discovery_zeroconf(5)
+            log_lines.append(f"Zeroconf found {len(devices) if devices else 0}")
             if not devices:
+                log_lines.append("Zeroconf found none, trying SSDP...")
                 devices = Vizio.discovery_ssdp(5)
-        except Exception:
+                log_lines.append(f"SSDP found {len(devices) if devices else 0}")
+        except Exception as e:
             devices = []
-        self.devices_discovered.emit(devices)
+            log_lines.append(f"Discovery exception: {e}")
+        payload = {'devices': devices, 'log': "\n".join(log_lines)}
+        self.devices_discovered.emit(payload)
 
-    def on_devices_discovered(self, devices):
+    def on_devices_discovered(self, payload):
         # update UI with discovered devices (runs in main thread via signal)
+        if isinstance(payload, dict):
+            devices = payload.get('devices', [])
+            log = payload.get('log', '')
+        else:
+            devices = payload
+            log = ''
+
+        if log:
+            # show the verbose discovery log in the auth status area
+            self.auth_status.setText(log)
+
         if not devices:
-            self.auth_status.setText("Background discovery found no devices")
+            if not log:
+                self.auth_status.setText("Background discovery found no devices")
             return
         self.devices_list.clear()
         for dev in devices:
             item = QtWidgets.QListWidgetItem(f"{getattr(dev, 'name', '')} ({getattr(dev, 'ip', '')})")
             item.setData(Qt.UserRole, dev)
             self.devices_list.addItem(item)
-        self.auth_status.setText(f"Background discovery: found {len(devices)} device(s)")
+        combined = f"Background discovery: found {len(devices)} device(s)"
+        if log:
+            combined = combined + "\n" + log
+        self.auth_status.setText(combined)
 
     def load_saved_devices(self):
         import json, os
