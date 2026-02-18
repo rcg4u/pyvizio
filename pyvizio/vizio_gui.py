@@ -541,7 +541,36 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             return
 
         self.selected_device = items[0].data(Qt.UserRole)
-        self.status_label.setText(f"Selected: {getattr(self.selected_device, 'name', '')} @ {getattr(self.selected_device, 'ip', '')}")
+        # support both object-like discovery results and dicts
+        name = getattr(self.selected_device, 'name', '') if not isinstance(self.selected_device, dict) else self.selected_device.get('name', '')
+        ip = getattr(self.selected_device, 'ip', '') if not isinstance(self.selected_device, dict) else self.selected_device.get('ip', '')
+        self.status_label.setText(f"Selected: {name} @ {ip}")
+
+        # Populate manual connect fields with discovered device info; include auth token if available
+        try:
+            port = getattr(self.selected_device, 'port', None) if not isinstance(self.selected_device, dict) else self.selected_device.get('port')
+            ip_text = f"{ip}:{port}" if port else ip
+            self.manual_ip_edit.setText(ip_text or "")
+        except Exception:
+            pass
+        try:
+            self.manual_name_edit.setText(name or "")
+        except Exception:
+            pass
+        # attempt to find an auth token on the discovery object (attr or dict keys)
+        auth = None
+        try:
+            if isinstance(self.selected_device, dict):
+                auth = self.selected_device.get('auth_token') or self.selected_device.get('auth') or self.selected_device.get('token')
+            else:
+                auth = getattr(self.selected_device, 'auth_token', None) or getattr(self.selected_device, 'auth', None) or getattr(self.selected_device, 'token', None)
+        except Exception:
+            auth = None
+        if auth:
+            try:
+                self.manual_auth_edit.setText(str(auth))
+            except Exception:
+                pass
 
     def connect_selected(self):
         if not self.selected_device:
