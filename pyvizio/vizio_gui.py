@@ -121,6 +121,8 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         except Exception:
             self.saved_devices_path = 'devices.json'
         self.load_saved_devices()
+        # favorites for current device (list of app names)
+        self.favorites = []
 
         # when a saved device is selected, handle it
         self.saved_devices_list.itemSelectionChanged.connect(self.on_saved_selected)
@@ -268,6 +270,21 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.launch_app_btn = QtWidgets.QPushButton("Launch App")
         self.launch_app_btn.clicked.connect(self.launch_app)
         apps_box.addWidget(self.launch_app_btn)
+        # Favorite apps (up to 6) and Add Favorite button
+        fav_row = QtWidgets.QHBoxLayout()
+        self.add_fav_btn = QtWidgets.QPushButton("Add to Favorites")
+        self.add_fav_btn.clicked.connect(self.add_selected_app_to_favorites)
+        apps_box.addWidget(self.add_fav_btn)
+        self.fav_buttons = []
+        favs_layout = QtWidgets.QHBoxLayout()
+        for i in range(6):
+            b = QtWidgets.QPushButton("-")
+            b.setEnabled(False)
+            b.setFixedWidth(80)
+            b.clicked.connect(lambda _, idx=i: self.favorite_button_clicked(idx))
+            self.fav_buttons.append(b)
+            favs_layout.addWidget(b)
+        apps_box.addLayout(favs_layout)
         io_layout.addLayout(apps_box)
 
         right.addLayout(io_layout)
@@ -313,10 +330,14 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.input_btn,
             self.apps_combo,
             self.launch_app_btn,
+            self.add_fav_btn,
             self.cmd_input,
             self.cmd_run_btn,
         ]:
             w.setEnabled(enabled)
+        # favorite buttons are separate list
+        for b in getattr(self, 'fav_buttons', []):
+            b.setEnabled(enabled and bool(self.favorites))
 
     def discover_devices(self):
         # synchronous discovery from UI with verbose status updates
@@ -424,6 +445,7 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             'device_type': self.device_type_combo.currentText(),
             'auth_token': self.auth_token_edit.text().strip(),
             'saved_at': __import__('datetime').datetime.utcnow().isoformat(),
+            'favorites': self.favorites,
         }
 
         # attempt to enrich with serial, esn, version (helps identify device and validate token)
@@ -503,6 +525,12 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             idx = self.device_type_combo.findText(dev.get('device_type'))
             if idx >= 0:
                 self.device_type_combo.setCurrentIndex(idx)
+        # load favorites if present
+        self.favorites = dev.get('favorites', []) or []
+        try:
+            self.update_favorite_buttons()
+        except Exception:
+            pass
 
     def on_device_selected(self):
         items = self.devices_list.selectedItems()
@@ -729,6 +757,7 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.warning(self, "Input Error", str(e))
 
     def populate_apps(self):
+        # populate apps list from public apps registry; update favorite buttons after
         try:
             apps = async_to_sync(VizioAsync.get_apps_list)()
             self.apps_combo.clear()
@@ -737,6 +766,80 @@ class ExtendedWindow(QtWidgets.QMainWindow):
                     self.apps_combo.addItem(str(a))
         except Exception:
             pass
+        # refresh favorites UI
+        try:
+            self.update_favorite_buttons()
+        except Exception:
+            pass
+
+    def add_selected_app_to_favorites(self):
+        app = self.apps_combo.currentText()
+        if not app:
+            self.auth_status.setText("No app selected to add to favorites")
+            return
+        if app in self.favorites:
+            self.auth_status.setText(f"App '{app}' already in favorites")
+            return
+        if len(self.favorites) >= 6:
+            self.auth_status.setText("Favorites full (6). Remove one before adding")
+            return
+        self.favorites.append(app)
+        self.update_favorite_buttons()
+        # persist to saved device entry if applicable
+        try:
+            self.save_favorites_to_saved_devices()
+        except Exception:
+            pass
+        self.auth_status.setText(f"Added '{app}' to favorites")
+
+    def update_favorite_buttons(self):
+        # update the UI text and enabled state for favorite buttons
+        for i in range(6):
+            b = self.fav_buttons[i]
+            if i < len(self.favorites):
+                b.setText(self.favorites[i])
+                b.setEnabled(True if self.vizio else True)
+            else:
+                b.setText("-")
+                b.setEnabled(False)
+
+    def favorite_button_clicked(self, idx: int):
+        if idx < 0 or idx >= len(self.favorites):
+            return
+        app = self.favorites[idx]
+        if not app:
+            return
+        # launch the app (attempt) using current Vizio connection; if not connected, try to connect
+        try:
+            if not self.vizio:
+                # attempt to connect to the selected saved device if present
+                if isinstance(self.selected_device, dict) and self.selected_device.get('ip'):
+                    ip = self.selected_device.get('ip')
+                    port = self.selected_device.get('port')
+                    if port:
+                        ip = f"{ip}:{port}"
+                    auth_token = self.auth_token_edit.text().strip()
+                    device_type = self.device_type_combo.currentText().strip()
+                    self.vizio = Vizio("pyvizio-gui", ip, self.selected_device.get('name', ''), auth_token, device_type, timeout=5)
+                    self.set_controls_enabled(bool(auth_token))
+            if self.vizio:
+                self.vizio.launch_app(app)
+                self.output.append(f"Launched favorite app {app}")
+        except Exception as e:
+            self.auth_status.setText(f"Failed to launch favorite: {e}")
+
+    def save_favorites_to_saved_devices(self):
+        # if the currently selected saved device exists in saved_devices, update its favorites list
+        if not isinstance(self.selected_device, dict):
+            return
+        ip = self.selected_device.get('ip')
+        port = self.selected_device.get('port')
+        for d in self.saved_devices:
+            if d.get('ip') == ip and d.get('port') == port:
+                d['favorites'] = self.favorites
+                self.save_saved_devices()
+                self.load_saved_devices()
+                return
 
     def launch_app(self):
         if not self.vizio:
