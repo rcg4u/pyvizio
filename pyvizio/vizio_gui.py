@@ -124,6 +124,10 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         # favorites for current device (list of app names)
         self.favorites = []
 
+        # volume freeze thread/event holders
+        self._volume_freeze_event = None
+        self._volume_freeze_thread = None
+
         # when a saved device is selected, handle it
         self.saved_devices_list.itemSelectionChanged.connect(self.on_saved_selected)
 
@@ -322,7 +326,30 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         self.set_volume_btn = QtWidgets.QPushButton("Set")
         self.set_volume_btn.clicked.connect(self.set_volume)
         vol_row.addWidget(self.set_volume_btn)
+        # Freeze toggle and interval
+        self.volume_freeze_chk = QtWidgets.QCheckBox("Freeze")
+        self.volume_freeze_chk.toggled.connect(self.toggle_freeze)
+        vol_row.addWidget(self.volume_freeze_chk)
+        vol_row.addWidget(QtWidgets.QLabel("Interval(s):"))
+        self.freeze_interval_spin = QtWidgets.QSpinBox()
+        self.freeze_interval_spin.setRange(1, 3600)
+        self.freeze_interval_spin.setValue(5)
+        vol_row.addWidget(self.freeze_interval_spin)
         right.addLayout(vol_row)
+
+        # Raw API runner (enter module.Class and args)
+        raw_row = QtWidgets.QHBoxLayout()
+        raw_row.addWidget(QtWidgets.QLabel("Raw API (module.Class):"))
+        self.raw_api_class_edit = QtWidgets.QLineEdit()
+        self.raw_api_class_edit.setPlaceholderText("pyvizio.api.settings.ChangeSettingCommand")
+        raw_row.addWidget(self.raw_api_class_edit)
+        self.raw_api_args_edit = QtWidgets.QLineEdit()
+        self.raw_api_args_edit.setPlaceholderText("arg1 arg2 ... (ints auto-parsed)")
+        raw_row.addWidget(self.raw_api_args_edit)
+        self.raw_api_run_btn = QtWidgets.QPushButton("Run Raw API")
+        self.raw_api_run_btn.clicked.connect(self.run_raw_api)
+        raw_row.addWidget(self.raw_api_run_btn)
+        right.addLayout(raw_row)
 
         # Output box
         right.addWidget(QtWidgets.QLabel("Output:"))
@@ -361,6 +388,11 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.cmd_run_btn,
             self.volume_spin,
             self.set_volume_btn,
+            self.volume_freeze_chk,
+            self.freeze_interval_spin,
+            self.raw_api_class_edit,
+            self.raw_api_args_edit,
+            self.raw_api_run_btn,
         ]:
             w.setEnabled(enabled)
         # favorite buttons are separate list
@@ -993,6 +1025,85 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.output.append(f"> set_audio_setting volume {val} -> {res}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Set Volume Error", str(e))
+
+    def toggle_freeze(self, checked: bool):
+        # Start/stop background thread that keeps the volume at the chosen level
+        if checked:
+            if not self.vizio:
+                QtWidgets.QMessageBox.warning(self, "Freeze", "No device connected")
+                # uncheck
+                try:
+                    self.volume_freeze_chk.setChecked(False)
+                except Exception:
+                    pass
+                return
+            # if already running, ignore
+            if self._volume_freeze_thread and self._volume_freeze_thread.is_alive():
+                return
+            self._volume_freeze_event = threading.Event()
+            interval = int(self.freeze_interval_spin.value())
+            target = int(self.volume_spin.value())
+            t = threading.Thread(target=self._freeze_worker, args=(self._volume_freeze_event, target, interval), daemon=True)
+            self._volume_freeze_thread = t
+            t.start()
+            self.output.append(f"> Volume freeze started at {target} (every {interval}s)")
+        else:
+            if self._volume_freeze_event:
+                self._volume_freeze_event.set()
+            self._volume_freeze_thread = None
+            self._volume_freeze_event = None
+            self.output.append("> Volume freeze stopped")
+
+    def _freeze_worker(self, stop_event: 'threading.Event', target: int, interval: int):
+        import time
+        # Keep setting volume periodically until stopped
+        while not stop_event.is_set():
+            try:
+                self.vizio.set_audio_setting("volume", int(target))
+            except Exception as e:
+                # show once and continue
+                try:
+                    self.output.append(f"> Volume freeze set failed: {e}")
+                except Exception:
+                    pass
+            # wait with short sleeps so stop is responsive
+            for _ in range(max(1, int(interval))):
+                if stop_event.is_set():
+                    break
+                time.sleep(1)
+
+    def run_raw_api(self):
+        if not self.vizio:
+            QtWidgets.QMessageBox.warning(self, "Raw API", "No device connected")
+            return
+        cls_path = self.raw_api_class_edit.text().strip()
+        if not cls_path or "." not in cls_path:
+            QtWidgets.QMessageBox.warning(self, "Raw API", "Enter module.Class path")
+            return
+        args_txt = self.raw_api_args_edit.text().strip()
+        args = []
+        if args_txt:
+            for p in args_txt.split():
+                try:
+                    args.append(int(p))
+                except ValueError:
+                    args.append(p)
+        try:
+            import importlib
+            module_name, class_name = cls_path.rsplit('.', 1)
+            mod = importlib.import_module(module_name)
+            cls = getattr(mod, class_name)
+            cmd_inst = cls(*args)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Raw API", f"Failed to construct command: {e}")
+            return
+        # invoke underlying API call that may or may not need auth
+        try:
+            invoker = getattr(self.vizio, f"_{VizioAsync.__name__}__invoke_api_may_need_auth")
+            res = async_to_sync(invoker)(cmd_inst)
+            self.output.append(f"> Raw API {cls_path} {args} -> {res}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Raw API Error", str(e))
 
     def send_direction(self, key_name: str):
         # Send navigation key via remote API
