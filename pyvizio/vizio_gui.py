@@ -292,12 +292,37 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         # Generic command executor
         right.addWidget(QtWidgets.QLabel("Execute arbitrary command (e.g. get_esn, get_version, setting audio Bass 5):"))
         cmd_row = QtWidgets.QHBoxLayout()
+        # Dropdown of available commands (populated from Vizio class)
+        self.cmd_combo = QtWidgets.QComboBox()
+        try:
+            cmds = [m for m in dir(Vizio) if callable(getattr(Vizio, m)) and not m.startswith('_')]
+            cmds.sort()
+            self.cmd_combo.addItem("")
+            for c in cmds:
+                self.cmd_combo.addItem(c)
+        except Exception:
+            pass
+        self.cmd_combo.currentIndexChanged.connect(lambda: self.cmd_input.setPlaceholderText(f"Args (space-separated) for {self.cmd_combo.currentText()}"))
+        cmd_row.addWidget(self.cmd_combo)
         self.cmd_input = QtWidgets.QLineEdit()
+        self.cmd_input.setPlaceholderText("If dropdown is blank, enter full command and args here")
         cmd_row.addWidget(self.cmd_input)
         self.cmd_run_btn = QtWidgets.QPushButton("Run")
         self.cmd_run_btn.clicked.connect(self.run_command)
         cmd_row.addWidget(self.cmd_run_btn)
         right.addLayout(cmd_row)
+
+        # Manual volume set controls
+        vol_row = QtWidgets.QHBoxLayout()
+        vol_row.addWidget(QtWidgets.QLabel("Set Volume:"))
+        self.volume_spin = QtWidgets.QSpinBox()
+        self.volume_spin.setRange(0, 100)
+        self.volume_spin.setValue(20)
+        vol_row.addWidget(self.volume_spin)
+        self.set_volume_btn = QtWidgets.QPushButton("Set")
+        self.set_volume_btn.clicked.connect(self.set_volume)
+        vol_row.addWidget(self.set_volume_btn)
+        right.addLayout(vol_row)
 
         # Output box
         right.addWidget(QtWidgets.QLabel("Output:"))
@@ -331,8 +356,11 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.apps_combo,
             self.launch_app_btn,
             self.add_fav_btn,
+            self.cmd_combo,
             self.cmd_input,
             self.cmd_run_btn,
+            self.volume_spin,
+            self.set_volume_btn,
         ]:
             w.setEnabled(enabled)
         # favorite buttons are separate list
@@ -920,10 +948,16 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         if not self.vizio:
             QtWidgets.QMessageBox.warning(self, "Command", "No device connected")
             return
-        txt = self.cmd_input.text().strip()
-        if not txt:
-            return
-        parts = txt.split()
+        # If a command is selected in the dropdown, use it; otherwise parse full text
+        selected = self.cmd_combo.currentText().strip() if hasattr(self, 'cmd_combo') else ''
+        if selected:
+            args_txt = self.cmd_input.text().strip()
+            parts = [selected] + (args_txt.split() if args_txt else [])
+        else:
+            txt = self.cmd_input.text().strip()
+            if not txt:
+                return
+            parts = txt.split()
         cmd = parts[0]
         args = []
         for p in parts[1:]:
@@ -938,9 +972,27 @@ class ExtendedWindow(QtWidgets.QMainWindow):
                 return
             meth = getattr(self.vizio, cmd)
             res = meth(*args)
-            self.output.append(f"> {txt} -> {res}")
+            display = f"> {cmd} {' '.join(map(str, args))} -> {res}"
+            self.output.append(display)
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Command Error", str(e))
+
+    def set_volume(self):
+        # Set audio 'volume' setting to specified level
+        if not self.vizio:
+            QtWidgets.QMessageBox.warning(self, "Set Volume", "No device connected")
+            return
+        try:
+            val = int(self.volume_spin.value())
+        except Exception:
+            QtWidgets.QMessageBox.warning(self, "Set Volume", "Invalid volume value")
+            return
+        try:
+            # set_audio_setting(setting_name, new_value)
+            res = self.vizio.set_audio_setting("volume", val)
+            self.output.append(f"> set_audio_setting volume {val} -> {res}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Set Volume Error", str(e))
 
     def send_direction(self, key_name: str):
         # Send navigation key via remote API
