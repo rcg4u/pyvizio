@@ -28,6 +28,15 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle("pyvizio GUI - Extended")
         self.resize(900, 600)
+        # Menu bar: Cast menu opens a dialog-based caster
+        try:
+            menubar = self.menuBar()
+            cast_menu = menubar.addMenu("Cast")
+            cast_action = QtWidgets.QAction("Cast Media...", self)
+            cast_action.triggered.connect(self.show_cast_dialog)
+            cast_menu.addAction(cast_action)
+        except Exception:
+            pass
 
         self.vizio: Optional[Vizio] = None
         self.selected_device = None
@@ -343,31 +352,8 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         vol_row.addWidget(self.freeze_interval_spin)
         right.addLayout(vol_row)
 
-        # Cast media and Raw API runner
-        raw_row = QtWidgets.QHBoxLayout()
-        # Cast media URL/file
-        raw_row.addWidget(QtWidgets.QLabel("Cast Media URL/File:"))
-        self.cast_url_edit = QtWidgets.QLineEdit()
-        self.cast_url_edit.setPlaceholderText("http(s) URL or local file path")
-        raw_row.addWidget(self.cast_url_edit)
-        self.browse_file_btn = QtWidgets.QPushButton("Browse...")
-        self.browse_file_btn.clicked.connect(self.browse_file)
-        raw_row.addWidget(self.browse_file_btn)
-        self.cast_app_id_edit = QtWidgets.QLineEdit()
-        self.cast_app_id_edit.setPlaceholderText("App ID (optional)")
-        raw_row.addWidget(self.cast_app_id_edit)
-        self.cast_namespace_spin = QtWidgets.QSpinBox()
-        self.cast_namespace_spin.setRange(0, 9999)
-        self.cast_namespace_spin.setValue(0)
-        raw_row.addWidget(self.cast_namespace_spin)
-        self.cast_app_name_edit = QtWidgets.QLineEdit()
-        self.cast_app_name_edit.setPlaceholderText("App Name (fallback)")
-        raw_row.addWidget(self.cast_app_name_edit)
-        self.cast_btn = QtWidgets.QPushButton("Cast")
-        self.cast_btn.clicked.connect(self.cast_media)
-        raw_row.addWidget(self.cast_btn)
-
         # Raw API runner (enter module.Class and args)
+        raw_row = QtWidgets.QHBoxLayout()
         raw_row.addWidget(QtWidgets.QLabel("Raw API (module.Class):"))
         self.raw_api_class_edit = QtWidgets.QLineEdit()
         self.raw_api_class_edit.setPlaceholderText("pyvizio.api.settings.ChangeSettingCommand")
@@ -422,12 +408,6 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.raw_api_class_edit,
             self.raw_api_args_edit,
             self.raw_api_run_btn,
-            self.cast_url_edit,
-            self.browse_file_btn,
-            self.cast_app_id_edit,
-            self.cast_namespace_spin,
-            self.cast_app_name_edit,
-            self.cast_btn,
         ]:
             w.setEnabled(enabled)
         # favorite buttons are separate list
@@ -1140,38 +1120,70 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Raw API Error", str(e))
 
-    def browse_file(self):
-        try:
+    def show_cast_dialog(self):
+        # Dialog to enter media URL or pick a local file, plus app id/namespace or app name
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("Cast Media")
+        layout = QtWidgets.QVBoxLayout(dlg)
+        form = QtWidgets.QFormLayout()
+        url_edit = QtWidgets.QLineEdit()
+        url_edit.setPlaceholderText("http(s) URL or local file path")
+        form.addRow("URL/File:", url_edit)
+        browse_btn = QtWidgets.QPushButton("Browse...")
+        def _browse():
             fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select media file", "", "Media Files (*.mp4 *.mkv *.avi *.mov *.mp3);;All Files (*)")
             if fname:
-                self.cast_url_edit.setText(fname)
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Browse File", str(e))
+                url_edit.setText(fname)
+        browse_btn.clicked.connect(_browse)
+        form.addRow("", browse_btn)
+        app_id_edit = QtWidgets.QLineEdit()
+        app_id_edit.setPlaceholderText("App ID (optional)")
+        form.addRow("App ID:", app_id_edit)
+        namespace_spin = QtWidgets.QSpinBox()
+        namespace_spin.setRange(0, 9999)
+        namespace_spin.setValue(0)
+        form.addRow("Namespace:", namespace_spin)
+        app_name_edit = QtWidgets.QLineEdit()
+        app_name_edit.setPlaceholderText("App Name (fallback)")
+        form.addRow("App Name:", app_name_edit)
 
-    def cast_media(self):
-        if not self.vizio:
-            QtWidgets.QMessageBox.warning(self, "Cast", "No device connected")
-            return
-        url = self.cast_url_edit.text().strip()
-        if not url:
-            QtWidgets.QMessageBox.warning(self, "Cast", "Enter a media URL or local file path")
-            return
-        app_id = self.cast_app_id_edit.text().strip()
-        namespace = int(self.cast_namespace_spin.value())
-        app_name = self.cast_app_name_edit.text().strip()
-        try:
-            if app_id:
-                res = self.vizio.launch_app_config(app_id, namespace, url)
-                self.output.append(f"> launch_app_config {app_id} {namespace} -> {res}")
+        layout.addLayout(form)
+        buttons = QtWidgets.QDialogButtonBox(QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel)
+        layout.addWidget(buttons)
+
+        def _do_cast():
+            url = url_edit.text().strip()
+            if not url:
+                QtWidgets.QMessageBox.warning(dlg, "Cast", "Enter a media URL or local file path")
                 return
-            if app_name:
-                res = self.vizio.launch_app(app_name)
-                self.output.append(f"> launch_app {app_name} -> {res}")
-        except Exception as e:
-            QtWidgets.QMessageBox.warning(self, "Cast Error", str(e))
-            return
+            if not self.vizio:
+                QtWidgets.QMessageBox.warning(dlg, "Cast", "No device connected")
+                return
+            app_id = app_id_edit.text().strip()
+            ns = int(namespace_spin.value())
+            app_name = app_name_edit.text().strip()
+            try:
+                if app_id:
+                    res = self.vizio.launch_app_config(app_id, ns, url)
+                    self.output.append(f"> launch_app_config {app_id} {ns} -> {res}")
+                    QtWidgets.QMessageBox.information(dlg, "Cast", f"Sent launch_app_config to {app_id}")
+                    dlg.accept()
+                    return
+                if app_name:
+                    res = self.vizio.launch_app(app_name)
+                    self.output.append(f"> launch_app {app_name} -> {res}")
+                    QtWidgets.QMessageBox.information(dlg, "Cast", f"Launched app {app_name}")
+                    dlg.accept()
+                    return
+            except Exception as e:
+                QtWidgets.QMessageBox.warning(dlg, "Cast Error", str(e))
+                return
+            QtWidgets.QMessageBox.information(dlg, "Cast", "If playback did not start, the target app may not accept direct URL launch messages or may require a different payload.")
+            dlg.accept()
 
-        self.output.append("> If playback did not start, the target app may not accept direct URL launch messages or may require a different payload.")
+        buttons.accepted.connect(_do_cast)
+        buttons.rejected.connect(dlg.reject)
+        dlg.exec_()
 
     def send_direction(self, key_name: str):
         # Send navigation key via remote API
