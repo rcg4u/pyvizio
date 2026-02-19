@@ -223,6 +223,9 @@ absolutely awesome SSDP discovery [snippet](https://gist.github.com/dankrause/60
 
 ## GUI (PyQt)
 
+<img width="900" height="796" alt="image" src="https://github.com/user-attachments/assets/86746f5b-52a3-4e91-ac32-cd6e720e0ab8" />
+
+
 A simple PyQt-based GUI is included to discover, pair with, and control Vizio devices.
 
 - Requirements: install PyQt5 (pip install PyQt5) or PySide2.
