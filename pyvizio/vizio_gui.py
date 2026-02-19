@@ -343,8 +343,31 @@ class ExtendedWindow(QtWidgets.QMainWindow):
         vol_row.addWidget(self.freeze_interval_spin)
         right.addLayout(vol_row)
 
-        # Raw API runner (enter module.Class and args)
+        # Cast media and Raw API runner
         raw_row = QtWidgets.QHBoxLayout()
+        # Cast media URL/file
+        raw_row.addWidget(QtWidgets.QLabel("Cast Media URL/File:"))
+        self.cast_url_edit = QtWidgets.QLineEdit()
+        self.cast_url_edit.setPlaceholderText("http(s) URL or local file path")
+        raw_row.addWidget(self.cast_url_edit)
+        self.browse_file_btn = QtWidgets.QPushButton("Browse...")
+        self.browse_file_btn.clicked.connect(self.browse_file)
+        raw_row.addWidget(self.browse_file_btn)
+        self.cast_app_id_edit = QtWidgets.QLineEdit()
+        self.cast_app_id_edit.setPlaceholderText("App ID (optional)")
+        raw_row.addWidget(self.cast_app_id_edit)
+        self.cast_namespace_spin = QtWidgets.QSpinBox()
+        self.cast_namespace_spin.setRange(0, 9999)
+        self.cast_namespace_spin.setValue(0)
+        raw_row.addWidget(self.cast_namespace_spin)
+        self.cast_app_name_edit = QtWidgets.QLineEdit()
+        self.cast_app_name_edit.setPlaceholderText("App Name (fallback)")
+        raw_row.addWidget(self.cast_app_name_edit)
+        self.cast_btn = QtWidgets.QPushButton("Cast")
+        self.cast_btn.clicked.connect(self.cast_media)
+        raw_row.addWidget(self.cast_btn)
+
+        # Raw API runner (enter module.Class and args)
         raw_row.addWidget(QtWidgets.QLabel("Raw API (module.Class):"))
         self.raw_api_class_edit = QtWidgets.QLineEdit()
         self.raw_api_class_edit.setPlaceholderText("pyvizio.api.settings.ChangeSettingCommand")
@@ -399,6 +422,12 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.raw_api_class_edit,
             self.raw_api_args_edit,
             self.raw_api_run_btn,
+            self.cast_url_edit,
+            self.browse_file_btn,
+            self.cast_app_id_edit,
+            self.cast_namespace_spin,
+            self.cast_app_name_edit,
+            self.cast_btn,
         ]:
             w.setEnabled(enabled)
         # favorite buttons are separate list
@@ -1110,6 +1139,39 @@ class ExtendedWindow(QtWidgets.QMainWindow):
             self.output.append(f"> Raw API {cls_path} {args} -> {res}")
         except Exception as e:
             QtWidgets.QMessageBox.warning(self, "Raw API Error", str(e))
+
+    def browse_file(self):
+        try:
+            fname, _ = QtWidgets.QFileDialog.getOpenFileName(self, "Select media file", "", "Media Files (*.mp4 *.mkv *.avi *.mov *.mp3);;All Files (*)")
+            if fname:
+                self.cast_url_edit.setText(fname)
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Browse File", str(e))
+
+    def cast_media(self):
+        if not self.vizio:
+            QtWidgets.QMessageBox.warning(self, "Cast", "No device connected")
+            return
+        url = self.cast_url_edit.text().strip()
+        if not url:
+            QtWidgets.QMessageBox.warning(self, "Cast", "Enter a media URL or local file path")
+            return
+        app_id = self.cast_app_id_edit.text().strip()
+        namespace = int(self.cast_namespace_spin.value())
+        app_name = self.cast_app_name_edit.text().strip()
+        try:
+            if app_id:
+                res = self.vizio.launch_app_config(app_id, namespace, url)
+                self.output.append(f"> launch_app_config {app_id} {namespace} -> {res}")
+                return
+            if app_name:
+                res = self.vizio.launch_app(app_name)
+                self.output.append(f"> launch_app {app_name} -> {res}")
+        except Exception as e:
+            QtWidgets.QMessageBox.warning(self, "Cast Error", str(e))
+            return
+
+        self.output.append("> If playback did not start, the target app may not accept direct URL launch messages or may require a different payload.")
 
     def send_direction(self, key_name: str):
         # Send navigation key via remote API
